@@ -147,13 +147,8 @@ for(i in my_genes){
 # View the plot(s)
 p1
 
-# Remove the y axis for four of the five plots
-p1$FOS$x$layout$yaxis$title$text <- ""
-p1$FOSB$x$layout$yaxis$title$text <- ""
-p1$JUN$x$layout$yaxis$title$text <- ""
-p1$JUNB$x$layout$yaxis$title$text <- ""
 
-# Save a plot. Here you will need to change the gene in the p1$IL6 to your gene of interest, and the filename. Once you have run the code, it will appear in the viewer. You can then download the plot from the options menu that appears above the plot. Unfortunately I haven't found a way to automate this!
+# Save a plot
 plotly::config(p1$ATF3,
     toImageButtonOptions = list(
       format = "png", # one of png, svg, jpeg, webp
