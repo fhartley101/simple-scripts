@@ -310,7 +310,7 @@ for(i in my_immune_sigs){
 p2
 
 
-# Save a plot. Here you will need to change the signature in the p2$IL6 to your signature of interest, and the filename. Once you have run the code, it will appear in the viewer. You can then download the plot from the options menu that appears above the plot. Unfortunately I haven't found a way to automate this!
+# Save a plot
 plotly::config(p2$ISG.RS,
     toImageButtonOptions = list(
       format = "png", # one of png, svg, jpeg, webp
