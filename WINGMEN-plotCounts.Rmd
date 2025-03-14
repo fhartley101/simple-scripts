@@ -1,0 +1,209 @@
+---
+title: "WINGMEN - Normalised Counts Plots"
+author: "Fiona Hartley"
+date: '`r format(Sys.Date(), "%Y-%B-%d")`'
+output: 
+  html_document:
+    toc: true
+    toc_depth: 5
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+options(stringsAsFactors = FALSE)
+
+```
+
+# Set directories
+Set the data directory as the folder where you have stored the data I've sent to you. It's probably easier to keep all of these in one place then you don't have to keep changing the code. I use the file names I gave to each of the objects to load them in, so if you changed the file names of anything I sent to you, you'll have to go through and change those within the code too.
+
+You should set the results directory to a folder where you want to store any plots produced.
+
+```{r set_directories}
+
+data_directory <- "C:/Users/fhartley/Desktop/data"
+res_directory <- "C:/Users/fhartley/Desktop/plots"
+
+```
+
+# Load packages
+
+```{r load_packages, echo=FALSE, message=FALSE, warning=FALSE}
+
+# Differential gene expression
+library(DESeq2)
+
+# Annotation
+library(org.Hs.eg.db)
+
+# Graphics
+library(ggplot2)
+library(plotly)
+
+# Other
+library(dplyr)
+library(tidyverse)
+
+```
+
+# Load the differential expression analysis results
+
+```{r load_files}
+
+# Read in the dds object
+dds <- readRDS(file = paste(data_directory, "dds.rds", sep = "/"))
+
+# Read in the metadata
+metadata <- readRDS(file = paste(data_directory, "metadata.rds", sep = "/"))
+metadata <- metadata[metadata$WINGMEN.sampleID %in% colnames(dds),]
+
+```
+
+# Prepare the normalised counts
+
+```{r prepare_input}
+
+# Extract counts
+dds.tmp <- DESeq2::counts(object = dds, normalized = TRUE)
+dds.tmp <- as.data.frame.table(t(dds.tmp))
+
+# Assign column names
+colnames(dds.tmp) <- c("WINGMEN.sampleID", "gene_id", "expr")
+
+# Merge
+dds.tmp <- merge(
+  x = dds.tmp,
+  y = metadata[,c("WINGMEN.sampleID", "Treatment", "WINGMEN.patientID")],
+  by = "WINGMEN.sampleID",
+  all.x = T
+)
+
+```
+
+# Create a vector of gene symbols you'd like to view the counts for 
+This can be as short as a single gene.
+
+```{r chosen_genes}
+
+# You can type your genes of interest in using the format below 
+my_genes <- c("FOS", 
+              "FOSB", 
+              "JUN",
+              "JUNB",
+              "ATF3")
+
+# Or you could read in a list from a csv. See genes_of_interest.csv for the format you should use. Change the filename of the csv if relevant
+my_genes <- unlist(as.vector(read.csv(
+  file = paste(data_directory, "genes_of_interest.csv", sep = "/"), header = F)))
+
+```
+
+# Create plots of normalised counts, with individual patients' PRE and POST samples connected
+Lots of this code just changes the way the plot looks. You can play around with colours and sizes to make it look how you want it to.
+
+```{r counts_plots}
+
+p1 <- list()
+for(i in my_genes){
+  j <- mapIds(org.Hs.eg.db, keys = i, column = "ENSEMBL", 
+                            keytype = "SYMBOL", multiVals = "first")[[1]]
+  # Generate the initial ggplots
+  p1[[i]] <- ggplot(dds.tmp[dds.tmp$gene_id == j,], 
+                    aes(Treatment, expr, fill = Treatment, text = WINGMEN.sampleID)) + 
+             geom_boxplot()+ 
+             geom_point()+
+             ylab("Normalised Counts")+
+             scale_fill_manual(values = c("black", "#f89b7c"))+ # You can change the colours of the PRE and POST boxplots
+             theme(
+                legend.position = "none",
+                panel.border = element_blank(),
+                panel.background = element_rect(fill = "transparent"),
+                plot.background = element_rect(fill ="transparent", color = NA),
+                axis.line.x = element_line(linewidth = 0.5, linetype = "solid", colour = "black"),
+                axis.line.y = element_line(linewidth = 0.5, linetype = "solid", colour = "black"),
+                axis.title.x = element_text(colour = "black", size = 12),
+                axis.title.y = element_text(colour = "black", size = 12),
+                axis.text.y = element_text(color = "black", size = 10),
+                axis.text.x = element_text(color = "black", size = 10),
+                plot.title = element_text(hjust = 0.5))+
+             ggtitle(i)
+  
+  # Add a geom_segment line for each patient pair to connect the dots
+  for(patient in metadata$WINGMEN.patientID[duplicated(metadata$WINGMEN.patientID)]){
+      p1[[i]] <- p1[[i]]+geom_segment(data = dds.tmp[dds.tmp$gene_id == j &
+                                                     dds.tmp$WINGMEN.patientID == patient,], 
+                                      aes(x = as.numeric(Treatment[Treatment == "PRE"]),
+                                          y = expr[2],
+                                          xend = as.numeric(Treatment[Treatment == "POST"]),
+                                          yend = expr[1]))
+  }
+  
+  # Make the plots interactive
+  p1[[i]] <- ggplotly(p1[[i]], tooltip = "text")
+}
+
+# View the plot(s)
+p1
+
+# Remove the y axis for four of the five plots
+p1$FOS$x$layout$yaxis$title$text <- ""
+p1$FOSB$x$layout$yaxis$title$text <- ""
+p1$JUN$x$layout$yaxis$title$text <- ""
+p1$JUNB$x$layout$yaxis$title$text <- ""
+
+# Save a plot. Here you will need to change the gene in the p1$IL6 to your gene of interest, and the filename. Once you have run the code, it will appear in the viewer. You can then download the plot from the options menu that appears above the plot. Unfortunately I haven't found a way to automate this!
+plotly::config(p1$ATF3,
+    toImageButtonOptions = list(
+      format = "png", # one of png, svg, jpeg, webp
+      filename = "ATF3",
+      width = 300,
+      height = 350,
+      scale = 5
+    ))
+
+
+```
+
+# Alternatively, if making plots in GraphPad is easier, this code will extract the normalised counts for your chosen genes in a format that is easy to copy and paste over. 
+A separate csv will be created for each gene, so be careful if you're using a long gene list.
+
+```{r counts_tables}
+
+t1 <- list()
+for(i in my_genes){
+  j <- mapIds(org.Hs.eg.db, keys = i, column = "ENSEMBL", 
+                            keytype = "SYMBOL", multiVals = "first")[[1]]
+  countsdata <- plotCounts(dds = dds, 
+                           gene = j, 
+                           intgroup = "Treatment", 
+                           returnData = T)
+  countsdata$ID <- rownames(countsdata)
+
+  pre <- countsdata[grep("PRE", rownames(countsdata)),]
+  pre$WINGMEN.patientID <- gsub("PRE", "", pre$ID)
+  colnames(pre)[1] <- "PRE"
+  
+  post <- countsdata[grep("POST", rownames(countsdata)),]
+  post$WINGMEN.patientID <- gsub("POST", "", post$ID)
+  colnames(post)[1] <- "POST"
+
+  countsdata <- merge(pre[,c(1,4)], 
+                      post[,c(1,4)], 
+                      by = "WINGMEN.patientID", 
+                      all = T)
+  
+  countsdata$WINGMEN.patientID <- as.numeric(countsdata$WINGMEN.patientID)
+  
+  t1[[i]] <- arrange(countsdata, WINGMEN.patientID)
+
+  }
+
+# Save the tables. A different csv file will be created for each gene
+for(i in names(t1)){
+  write.csv(t1[[i]], paste0(res_directory, "/", i, ".csv"))
+}
+
+```
+

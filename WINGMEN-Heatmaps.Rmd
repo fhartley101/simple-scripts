@@ -1,0 +1,339 @@
+---
+title: "WINGMEN Heatmaps"
+author: "Fiona Hartley"
+date: '`r format(Sys.Date(), "%Y-%B-%d")`'
+output: 
+  html_document:
+    toc: true
+    toc_depth: 5
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+options(stringsAsFactors = FALSE)
+
+```
+
+# Set directories
+Set the data directory as the folder where you have stored the data I've sent to you. It's probably easier to keep all of these in one place then you don't have to keep changing the code. I use the file names I gave to each of the objects to load them in, so if you changed the file names of anything I sent to you, you'll have to go through and change those within the code too.
+
+You should set the results directory to a folder where you want to store any plots produced.
+
+```{r set_directories}
+
+data_directory <- "C:/Users/fhartley/Desktop/data"
+res_directory <- "C:/Users/fhartley/Desktop/plots"
+
+```
+
+# Load packages
+
+```{r load_packages, echo=FALSE, message=FALSE, warning=FALSE}
+
+# Annotation
+library(org.Hs.eg.db)
+
+# Differential gene expression
+library(DESeq2)
+
+# Graphics
+library(ggplot2)
+library(ComplexHeatmap)
+library(circlize)
+
+# Other
+library(dplyr)
+library(tidyverse)
+
+```
+
+# Load and prepare the rlog object.
+This contains the normalised, log transformed counts.
+
+```{r load_rlog}
+
+# Load the data
+rlog <- readRDS(file = paste0(data_directory, "/rlogcount.rds"))
+
+# Extract the rlog values
+rlog <- as.data.frame(assay(rlog))
+
+# Change the rownames to gene symbols
+rlog$symbol <- mapIds(org.Hs.eg.db, keys = rownames(rlog), 
+                           column = "SYMBOL", keytype = "ENSEMBL", multiVals = "first")
+rlog <- rlog[!is.na(rlog$symbol),]
+rlog <- rlog[!duplicated(rlog$symbol),]
+rownames(rlog) <- rlog$symbol
+rlog <- rlog[,-ncol(rlog)]
+
+# Convert to a matrix
+rlog <- as.matrix(rlog)
+
+```
+
+# Load the metadata file. 
+This file contains all of the information about the patients and their samples. You can browse this table to look at all the different types of information you can include to label samples in the heatmaps. Many have both continuous and categorical versions of themselves (e.g. BMI as a continuous numerical variable, or listed categorically as Normal, Overweight, and Obese)
+
+```{r load_metadata}
+
+metadata <- readRDS(file = paste0(data_directory, "/metadata.rds"))
+metadata <- metadata[metadata$WINGMEN.sampleID %in% colnames(rlog),]
+
+```
+
+# Load the differential expression analysis results
+
+```{r load_results}
+
+# Read in the results file
+res_all <- read.csv(file = paste(data_directory, "results.csv", sep = "/"))
+
+# Remove any results that don't have an adjusted p value (i.e the adjusted p value is NA - this happens when genes are removed by independent filtering in DESeq2)
+res_all <- res_all[!is.na(res_all$padj),] 
+
+```
+
+# Choose the genes you would like to display on the heatmap
+You can choose to display all genes, significantly differentially expressed genes, or a custom list of genes (e.g. IGF related genes, immune genes)
+
+```{r genes_of_interest}
+
+# To include all genes, run this line. This will be quite slow so I don't recommend.
+rlog_selected <- rlog[rownames(rlog) %in% res_all$symbol,]
+  
+
+# To include significantly differentially expressed genes, run this line. You can change the adjusted p value filter here if you'd like to be more/less stringent.
+rlog_selected <- rlog[rownames(rlog) %in% res_all[res_all$padj <= 0.05,]$symbol,]
+
+
+# To include a custom list of genes, input your genes using the format below and run this line.
+rlog_selected <- rlog[rownames(rlog) %in% c("IGF1",
+                                            "IGFBP5",
+                                            "IL6"),]
+
+
+# To include a custom list of genes by reading them in from a file, run this line. See genes_of_interest.csv for the format you should use. Change the filename of the csv if relevant
+rlog_selected <- rlog[rownames(rlog) %in% unlist(as.vector(read.csv(
+  file = paste(data_directory, "genes_of_interest.csv", sep = "/"), header = F))),]
+
+```
+
+# Generate an annotation for the heatmap
+This is the data that is found on the coloured bars at the top of the heatmap. It can include any information that is found in the metadata table.
+
+## First create a function to make generating the annotation easier
+If you would like to change any of the colours used, do that by editing this function. Otherwise, you won't need to change anything.
+
+```{r heatmap_annotation_function}
+
+my_annotation <- function(Treatment = TRUE, BMI = TRUE, Age = TRUE, PSA_elevated = TRUE,
+                          PTEN_Status = TRUE,
+                          Tumour_stage = TRUE, Gleason_Score = TRUE, Infusions = TRUE, 
+                          Androgen_Receptor = TRUE, Tumour_pIGF1R = TRUE, Tissue_pIGF1R = TRUE, 
+                          pIGF1R_responder = TRUE, Tumour_pS6 = TRUE, pS6_responder = TRUE, 
+                          Serum_IGF1 = TRUE, IGF1_mRNA = TRUE, FAP_mRNA = TRUE){
+  
+    # Create an empty list to hold data for the data frame
+    annotation_data <- list()
+  
+    # Add each annotation based on the conditions
+    if (Treatment) annotation_data$Treatment <- metadata$Treatment
+    if (BMI) annotation_data$BMI <- metadata$BMI_cat
+    if (Age) annotation_data$Age <- metadata$Age
+    if (PSA_elevated) annotation_data$PSA_elevated <- metadata$PSA_elevated
+    if (PTEN_Status) annotation_data$PTEN_Status <- metadata$PTEN
+    if (Tumour_stage) annotation_data$Tumour_stage <- metadata$t_label2
+    if (Gleason_Score) annotation_data$Gleason_Score <- metadata$Gleason_Score2
+    if (Infusions) annotation_data$Infusions <- metadata$Infusions
+    if (Androgen_Receptor) annotation_data$Androgen_Receptor <- metadata$AR_pc
+    if (Tumour_pIGF1R) annotation_data$Tumour_pIGF1R <- metadata$pIGF1R_pc
+    if (Tissue_pIGF1R) annotation_data$Tissue_pIGF1R <- metadata$pIGF1R_whole_tissue_pc
+    if (pIGF1R_responder) annotation_data$pIGF1R_responder <- metadata$pIGF1R_change_cat
+    if (Tumour_pS6) annotation_data$Tumour_pS6 <- metadata$pS6_pc
+    if (pS6_responder) annotation_data$pS6_responder <- metadata$pS6_change_cat
+    if (Serum_IGF1) annotation_data$Serum_IGF1 <- metadata$serum_igf
+    if (IGF1_mRNA) annotation_data$IGF1_mRNA <- metadata$IGF1_mRNA_STAR
+    if (FAP_mRNA) annotation_data$FAP_mRNA <- metadata$FAP_mRNA_STAR
+  
+    # Ensure there is at least one annotation is selected
+    if (length(annotation_data) == 0) {
+      stop("At least one annotation must be selected")
+    }
+  
+    # Convert list to data frame
+    anno_df <- as.data.frame(annotation_data)
+    
+    # Create the annotation object
+    ha <- HeatmapAnnotation(
+            df = anno_df,
+            col = list(
+              Treatment = c("PRE" = "#f8766d", 
+                            "POST" = "#619CFF"),
+              BMI = c("Healthy" = "yellow", 
+                      "Overweight" = "orange", 
+                      "Obese" = "red"),
+              Age = colorRamp2(c(min(metadata$Age, na.rm = TRUE), 
+                                 max(metadata$Age, na.rm = TRUE)), 
+                               c("white", "darkgray")), # The lowest value is white, and the highest is this shade of grey
+              PSA_elevated = c("Normal_PSA" = "yellow", 
+                               "Elevated_PSA" = "red"),
+              PTEN_Status = c("+" = "yellow", 
+                               "-" = "red"),
+              Tumour_stage = c("T2a" = "#ffa494", 
+                               "T2b" = "#ff7961", 
+                               "T2c" = "#ff6347",
+                               "T3a" = "#ff4d2e", 
+                               "T3b" = "#ff3814", 
+                               "T3c" = "#fa2600"),
+              Gleason_Score = c("Gleeson 7 (3+4)" = "#67e691", 
+                                "Gleeson 7 (4+3)" = "#50c878", 
+                                "Gleeson 8 (4+4)" = "#378a52", 
+                                "Gleeson 9 (4+5)" = "#205c34", 
+                                "Gleeson 9 (5+4)" = "#154224"),
+              Infusions = c("4" = "#bae4b3", 
+                            "5" = "#74c476", 
+                            "6" = "#238b45"),
+              Androgen_Receptor = colorRamp2(c(min(metadata$AR_pc, na.rm = TRUE), 
+                                               max(metadata$AR_pc, na.rm = TRUE)),
+                                             c("white", "magenta4")), # The lowest value is white, and the highest is this shade of magenta
+              Tumour_pIGF1R = colorRamp2(c(min(metadata$pIGF1R_pc, na.rm = TRUE),
+                                    max(metadata$pIGF1R_pc, na.rm = TRUE)),
+                                  c("white", "magenta4")),# The lowest value is white, and the highest is this shade of magenta
+              Tissue_pIGF1R = colorRamp2(c(min(metadata$pIGF1R_whole_tissue_pc, na.rm = TRUE),
+                                    max(metadata$pIGF1R_whole_tissue_pc, na.rm = TRUE)),
+                                  c("white", "magenta4")),# The lowest value is white, and the highest is this shade of magenta
+              pIGF1R_responder = c("Non_responder" = "yellow", 
+                                   "Low_responder" = "orange",
+                                   "High_responder" = "orangered"),
+              Tumour_pS6 = colorRamp2(c(min(metadata$pS6_pc, na.rm = TRUE),
+                                 max(metadata$pS6_pc, na.rm = TRUE)),
+                               c("white", "magenta4")),# The lowest value is white, and the highest is this shade of magenta
+              pS6_responder = c("Non_responder" = "yellow", 
+                                "Low_responder" = "orange",
+                                "High_responder" = "orangered"),
+              Serum_IGF1 = colorRamp2(c(min(metadata$serum_igf, na.rm = TRUE), 
+                                        max(metadata$serum_igf, na.rm = TRUE)),
+                                      c("white", "magenta4")), # The lowest value is white, and the highest is this shade of magenta
+              IGF1_mRNA = colorRamp2(c(min(metadata$IGF1_mRNA_STAR, na.rm = TRUE),
+                                       max(metadata$IGF1_mRNA_STAR, na.rm = TRUE)),
+                                     c("white", "magenta4")), # The lowest value is white, and the highest is this shade of magenta
+              FAP_mRNA = colorRamp2(c(min(metadata$FAP_mRNA_STAR, na.rm = TRUE),
+                                      max(metadata$FAP_mRNA_STAR, na.rm = TRUE)),
+                                    c("white", "magenta4")) # The lowest value is white, and the highest is this shade of magenta
+              ),
+            annotation_name_gp = gpar(fontsize = 8),
+          #  annotation_legend_param = list(
+           #   title_gp = gpar(fontsize = 7),
+            #  labels_gp = gpar(fontsize = 6)
+             # ),
+           annotation_legend_param = list(
+    Treatment = list(title = "Treatment", title_gp = gpar(fontsize = 7), labels_gp = gpar(fontsize = 6)),
+    PTEN_Status = list(title = "PTEN", title_gp = gpar(fontsize = 7), labels_gp = gpar(fontsize = 6)),
+    Infusions = list(title = "No. Infusions", title_gp = gpar(fontsize = 7), labels_gp = gpar(fontsize = 6)),
+    Tissue_pIGF1R = list(title = "Tissue pIGF1R", title_gp = gpar(fontsize = 7), labels_gp = gpar(fontsize = 6)),
+    Tumour_pS6 = list(title = "Tumour pS6", title_gp = gpar(fontsize = 7), labels_gp = gpar(fontsize = 6)),
+    Serum_IGF1 = list(title = "Bioactive IGF1", title_gp = gpar(fontsize = 7), labels_gp = gpar(fontsize = 6))
+    
+  ),
+            na_col = "gray90" # Colour for NA values
+    )
+  
+    return(ha)
+
+}
+
+
+```
+
+## Second, generate your annotation
+Change the TRUE and FALSE options to include your variables of choice
+
+```{r heatmap_annotation}
+
+ha <- my_annotation(Treatment = TRUE, 
+                    BMI = FALSE, 
+                    Age = FALSE, 
+                    PSA_elevated = FALSE,
+                    PTEN_Status = TRUE,
+                    Tumour_stage = FALSE, 
+                    Gleason_Score = FALSE, 
+                    Infusions = TRUE, 
+                    Androgen_Receptor = FALSE, 
+                    Tumour_pIGF1R = FALSE,
+                    Tissue_pIGF1R = TRUE,
+                    pIGF1R_responder = FALSE,
+                    Tumour_pS6 = TRUE, 
+                    pS6_responder = FALSE, 
+                    Serum_IGF1 = TRUE,
+                    IGF1_mRNA = FALSE, 
+                    FAP_mRNA = FALSE)
+
+```
+
+# Generate the heatmap
+
+```{r heatmap, message=FALSE, warning=FALSE, fig.height=9, fig.width=5}
+
+# Scale to Z score
+rlog_selected_scaled <- t(scale(t(rlog_selected)))
+
+# Generate a colour function for the heatmap. You can change these colours if you like.
+col_fun <- colorRamp2(c(-3, 0, 3), c("blue", "white", "red"))
+
+# Generate a heatmap with sample clustering
+ht <- Heatmap(rlog_selected_scaled, 
+        col = col_fun, 
+        cluster_rows = T,        # If you would like to turn off clustering, change this to FALSE
+        cluster_columns = T,     # If you would like to turn off clustering, change this to FALSE
+        row_names_side = "right", 
+        row_names_gp = gpar(fontsize = 6),    # Font size of the rownames (genes)
+        column_names_gp = gpar(fontsize = 6), # Font size of the column names (samples)
+        top_annotation = ha,
+        heatmap_legend_param = list(title = "Z Score",
+                                    title_gp = gpar(fontsize = 7),  
+                                    labels_gp = gpar(fontsize = 6))
+)
+
+
+# Draw
+ht <- draw(ht, 
+           annotation_legend_side = "bottom",  # You can move the legends to the "left" of the plot by changing this parameter
+           heatmap_legend_side = "bottom",     # You can move the legends to the "left" of the plot by changing this parameter
+           merge_legends = TRUE
+)
+
+# Adjust the labels for publication
+ht@ht_list$matrix_8@top_annotation@anno_list$PTEN_Status@label <- "PTEN"
+ht@ht_list$matrix_8@top_annotation@anno_list$PTEN_Status@name <- "PTEN"
+ht@ht_list$matrix_8@top_annotation@anno_list$Infusions@label <- "No. Infusions"
+ht@ht_list$matrix_8@top_annotation@anno_list$Infusions@name <- "No. Infusions"
+ht@ht_list$matrix_8@top_annotation@anno_list$Tissue_pIGF1R@label <- "Tissue pIGF1R"
+ht@ht_list$matrix_8@top_annotation@anno_list$Tissue_pIGF1R@name <- "Tissue pIGF1R"
+ht@ht_list$matrix_8@top_annotation@anno_list$Tumour_pS6@label <- "Tumour pS6"
+ht@ht_list$matrix_8@top_annotation@anno_list$Tumour_pS6@name <- "Tumour pS6"
+ht@ht_list$matrix_8@top_annotation@anno_list$Serum_IGF1@label <- "Bioactive IGF1"
+ht@ht_list$matrix_8@top_annotation@anno_list$Serum_IGF1@name <- "Bioactive IGF1"
+
+ht
+
+```
+
+
+# Save the plot
+
+```{r}
+
+png(filename = file.path(res_directory, "Heatmap.png"), # Type your chosen file name here
+    width = 15,   # Change the plot size by adjusting width. This size is optimised for showing all the DEGs, but if you change the number of genes or annotations you are showing, you will need to change these accordingly.
+    height = 25,  # Change the plot size by adjusting height. This size is optimised for showing all the DEGs, but if you change the number of genes or annotations you are showing, you will need to change these accordingly.
+    units = "cm", # I have used cm, but other units of measure are available
+    res = 1200
+    ) 
+ht 
+dev.off()
+
+
+```
+

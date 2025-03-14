@@ -1,0 +1,192 @@
+---
+title: "WINGMEN Volcano Plots"
+author: "Fiona Hartley"
+date: '`r format(Sys.Date(), "%Y-%B-%d")`'
+output: 
+  html_document:
+    toc: true
+    toc_depth: 5
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+options(stringsAsFactors = FALSE)
+
+```
+
+# Set directories
+Set the data directory as the folder where you have stored the data I've sent to you. It's probably easier to keep all of these in one place then you don't have to keep changing the code. I use the file names I gave to each of the objects to load them in, so if you changed the file names of anything I sent to you, you'll have to go through and change those within the code too.
+
+You should set the results directory to a folder where you want to store any plots produced.
+
+```{r set_directories}
+
+data_directory <- "C:/Users/fhartley/Desktop/data"
+res_directory <- "C:/Users/fhartley/Desktop/plots"
+
+```
+
+# Load packages
+
+```{r load_packages, echo=FALSE, message=FALSE, warning=FALSE}
+
+# Graphics
+library(EnhancedVolcano)
+
+# Other
+library(dplyr)
+library(tidyverse)
+
+```
+
+# Load the differential expression analysis results
+
+```{r load_results}
+
+# Read in the results file
+res_all <- read.csv(file = paste(data_directory, "results.csv", sep = "/"))
+
+# Remove any results that don't have an adjusted p value (i.e the adjusted p value is NA - this happens when genes are removed by independent filtering in DESeq2)
+res_all <- res_all[!is.na(res_all$padj),] 
+
+```
+
+# Volcano plots
+Volcano plots are a useful way to visualise the results of differential expression analyses. Here we use EnhancedVolcano (Blighe, Rana, and Lewis 2018), an R package that produces publication-ready volcano plots. An in depth user guide is found at: https://bioconductor.org/packages/devel/bioc/vignettes/EnhancedVolcano/inst/doc/EnhancedVolcano.html
+
+Volcano plots can be displayed with either the p value or the adjusted p value on the y axis. I personally prefer to do the adjusted p value, because then the results that you highlight are truly the significant ones, but both are common and accepted in publications. I've included code here for both so you can do whichever you choose.
+
+You can also label whatever genes you want to in the plots. If you don't input a list of genes to display, the default is to label the differentially expressed genes. If there are too many genes to display clearly, the function will just choose whichever ones show up best without overlapping. If you would like to label specific genes (e.g. IGF related genes, immune related genes) you can store those in the "my_genes" object and input them using the "selectLab" option.
+
+
+## Optional: create a vector of gene symbols you'd like to display in the volcano plot. 
+Note that sometimes not all of the genes you want to label will show up if they are too clustered together. This is to prevent the labels from sitting on top of each other. You can put the labels in boxes or add connecting lines between the dots and the labels which generally helps to show more of the genes (see volcano plot code below to do this)
+
+```{r volcano_plots_genes}
+
+# You can type your genes of interest in using the format below 
+my_genes <- c("IGF1", 
+              "IGFBP5", 
+              "IL6")
+
+# Or you could read in a list from a csv. See genes_of_interest.csv for the format you should use. Change the filename of the csv if relevant
+my_genes <- unlist(as.vector(read.csv(
+  file = paste(data_directory, "genes_of_interest.csv", sep = "/"), header = F)))
+
+```
+
+## Create a volcano plot with p value on the y axis
+Lots of this code just changes the way the volcano plot looks. You can play around with colours and sizes to make the plot look how you want it to.
+
+```{r volcano_plots_pval}
+
+p1 <- EnhancedVolcano(res_all, # Input the data
+    lab = res_all$symbol,  # This means that the gene symbols will be used for labelling
+    #selectLab = my_genes,  # Remove the "#" to label your pre-loaded genes of interest 
+    boxedLabels = TRUE,    # This puts the gene symbol label inside a box. It can make it easier to read depending on the plot and how many labels you have. I'd recommend trying with and without this to see which looks best for the set of genes you have.
+    drawConnectors = TRUE, # This puts a connecting line between your label and the dot. Again, it can make it easier to read depending on the plot and how clustered together the dots are that you want to label. I'd recommend trying with and without this to see which looks best for the set of genes you have.
+    x = 'log2FoldChange',
+    y = 'pvalue',
+    xlab = expression("Log"[2]*" Fold Change"),
+    title = NULL,   # This is the plot title - you can change this or remove it by setting it to NULL
+    pCutoff = 0.05,    # If you would like to change the p value cutoff, you can do that here
+    FCcutoff = 1,      # This is the vertical line on the plot that marks the log2 fold change cutoff. You can change this to whatever value you like
+    titleLabSize = 14, # Change the size of the plot title
+    pointSize = 2.5,   # Change the size of the dots
+    labSize = 4,       # Change the size of the gene labels
+    col = c("grey60", "grey60", "grey60", "red2"), # I colour the genes that are significant and above the fold change cutoff red, and leave everything else grey. You can change these colours as you wish.
+    gridlines.minor = FALSE, # I remove the gridlines because I think it looks more publication ready, but you can change this to TRUE
+    gridlines.major = FALSE, # I remove the gridlines because I think it looks more publication ready, but you can change this to TRUE
+    cutoffLineWidth = 0.5,   # Thickness of the p value and fold change lines
+    legendPosition = "none",
+    caption = NULL,
+    subtitle = NULL # If you'd like a subtitle, add text here (e.g. "My Subtitle")
+    )+
+    ggplot2::coord_cartesian(xlim=c(-round(max(abs(res_all$log2FoldChange)),1),
+                                    round(max(abs(res_all$log2FoldChange)),1)), # This bit of code makes the plot symmetrical (i.e. 0 log fold change is in the centre)
+                             ylim = c(0, max(-log10(res_all$pvalue), na.rm = TRUE) + 1))+ 
+      scale_y_continuous(expand = c(0, 0))+
+      theme(
+      axis.line.x = element_line(linewidth = 0.5, linetype = "solid", colour = "black"),
+      axis.line.y = element_line(linewidth = 0.5, linetype = "solid", colour = "black"),
+      axis.title.x = element_text(colour = "black", size = 12),
+      axis.title.y = element_text(colour = "black", size = 12),
+      axis.text.y = element_text(color = "black", size = 10),
+      axis.text.x = element_text(color = "black", size = 10), # All of the above lines of code set the font/line colours and sizes. Play around with them as you like
+      plot.title = element_text(hjust = 0.5)) # This makes the plot title sit in the centre. You can move it to the side by changing the number to 0 or 1
+
+
+# Print the plot
+p1
+
+
+# Save the plot
+ggsave(filename = "volcano_plot_pval.png", # Type your chosen file name here
+       plot = p1,
+       device = png, # The saved image type. Other formats are available, see: https://ggplot2.tidyverse.org/reference/ggsave.html
+       width = 15,   # Change the plot size by adjusting width
+       height = 10,  # Change the plot size by adjusting height
+       units = "cm", # I have used cm, but other units of measure are available, see link above
+       dpi = 1200,
+       path = res_directory)
+
+```
+
+## Create a volcano plot with the adjusted p value on the y axis
+Lots of this code just changes the way the volcano plot looks. You can play around with colours and sizes to make the plot look how you want it to.
+
+```{r volcano_plots_fdr}
+
+p2 <- EnhancedVolcano(res_all, # Input the data
+    lab = res_all$symbol,   # This means that the gene symbols will be used for labelling
+    #selectLab = my_genes,  # Remove the "#" to label your pre-loaded genes of interest 
+    boxedLabels = TRUE,    # This puts the gene symbol label inside a box. It can make it easier to read depending on the plot and how many labels you have. I'd recommend trying with and without this to see which looks best for the set of genes you have.
+    drawConnectors = TRUE, # This puts a connecting line between your label and the dot. Again, it can make it easier to read depending on the plot and how clustered together the dots are that you want to label. I'd recommend trying with and without this to see which looks best for the set of genes you have.
+    x = 'log2FoldChange',
+    y = 'padj',
+    xlab = expression("Log"[2]*" Fold Change"),
+    ylab = expression("-Log"[10]*" FDR"),
+    title = "Xentuzumab Treatment",   # This is the plot title - you can change this or remove it by setting it to NULL
+    pCutoff = 0.05,    # If you would like to change the p value cutoff, you can do that here
+    FCcutoff = 1,      # This is the vertical line on the plot that marks the fold change cutoff. You can change this to whatever value you like
+    titleLabSize = 14, # Change the size of the plot title
+    pointSize = 2.5,   # Change the size of the dots
+    labSize = 4,       # Change the size of the gene labels
+    col = c("grey60", "grey60", "grey60", "red2"), # I colour the genes that are significant and above the fold change cutoff red, and leave everything else grey. You can change these colours as you wish.
+    gridlines.minor = FALSE, # I remove the gridlines because I think it looks more publication ready, but you can change this to TRUE
+    gridlines.major = FALSE, # I remove the gridlines because I think it looks more publication ready, but you can change this to TRUE
+    cutoffLineWidth = 0.5,   # Thickness of the p value and fold change lines
+    legendPosition = "none",
+    caption = NULL,
+    subtitle = NULL # If you'd like a subtitle add text here (e.g. "My Subtitle")
+    )+
+    ggplot2::coord_cartesian(xlim=c(-round(max(abs(res_all$log2FoldChange)),1),
+                                    round(max(abs(res_all$log2FoldChange)),1)), # This bit of code makes the plot symmetrical (i.e. 0 log fold change is in the centre). You can remove it if you want.
+                             ylim = c(0, max(-log10(res_all$padj), na.rm = TRUE) + 1))+ 
+      scale_y_continuous(expand = c(0, 0))+
+      theme(
+      axis.line.x = element_line(linewidth = 0.5, linetype = "solid", colour = "black"),
+      axis.line.y = element_line(linewidth = 0.5, linetype = "solid", colour = "black"),
+      axis.title.x = element_text(colour = "black", size = 12),
+      axis.title.y = element_text(colour = "black", size = 12),
+      axis.text.y = element_text(color = "black", size = 10),
+      axis.text.x = element_text(color = "black", size = 10), # All of the above lines of code set the font/line colours and sizes. Play around with them as you like
+      plot.title = element_text(hjust = 0.5)) # This makes the plot title sit in the centre. You can move it to the side by changing the number here
+
+# Print the plot
+p2
+
+
+# Save the plot
+ggsave(filename = "volcano_plot_padj.png", # Type your chosen file name here
+       plot = p2,
+       device = png, # The saved image type. Other formats are available, see: https://ggplot2.tidyverse.org/reference/ggsave.html
+       width = 15,   # Change the plot size by adjusting width
+       height = 10,  # Change the plot size by adjusting height
+       units = "cm", # I have used cm, but other units of measure are available, see link above
+       path = res_directory)
+
+
+```
